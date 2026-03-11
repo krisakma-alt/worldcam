@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorldCam — 지금 세계는</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  :root {
+    --ink: #0a0a0f;
+    --paper: #f5f0e8;
+    --sepia: #c8a96e;
+    --rust: #b85c38;
+    --fog: #8a8a9a;
+    --glass: rgba(245,240,232,0.06);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--ink);
+    color: var(--paper);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.4;
+  }
+
+  .layout {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-rows: auto auto 1fr auto;
+    min-height: 100vh;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 2rem;
+  }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 2rem 0 1.5rem;
+    border-bottom: 1px solid rgba(200,169,110,0.2);
+  }
+
+  .logo {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.6rem;
+    font-style: italic;
+    color: var(--sepia);
+    letter-spacing: -0.02em;
+  }
+  .logo span { font-style: normal; font-weight: 700; color: var(--paper); }
+
+  .header-meta {
+    font-size: 0.65rem;
+    color: var(--fog);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
+  /* 검색 바 */
+  .search-bar {
+    display: flex;
+    gap: 0.6rem;
+    padding: 1.2rem 0 0.8rem;
+    align-items: center;
+    flex-wrap: wrap;
+    border-bottom: 1px solid rgba(200,169,110,0.1);
+  }
+
+  .search-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 200px;
+    max-width: 380px;
+  }
+
+  .search-input {
+    width: 100%;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(200,169,110,0.25);
+    color: var(--paper);
+    padding: 0.6rem 1rem 0.6rem 2.4rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    border-radius: 2px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .search-input:focus { border-color: var(--sepia); }
+  .search-input::placeholder { color: var(--fog); }
+
+  .search-icon {
+    position: absolute;
+    left: 0.8rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--fog);
+    font-size: 0.8rem;
+    pointer-events: none;
+  }
+
+  /* 자동완성 드롭다운 */
+  .autocomplete {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: #14141c;
+    border: 1px solid rgba(200,169,110,0.2);
+    z-index: 100;
+    max-height: 200px;
+    overflow-y: auto;
+    display: none;
+  }
+
+  .autocomplete.show { display: block; }
+
+  .autocomplete-item {
+    padding: 0.6rem 1rem;
+    font-size: 0.7rem;
+    color: var(--fog);
+    cursor: pointer;
+    border-bottom: 1px solid rgba(200,169,110,0.08);
+    transition: background 0.15s;
+    letter-spacing: 0.05em;
+  }
+
+  .autocomplete-item:hover, .autocomplete-item.selected {
+    background: rgba(200,169,110,0.1);
+    color: var(--paper);
+  }
+
+  .autocomplete-item .place-type {
+    font-size: 0.55rem;
+    color: var(--sepia);
+    margin-left: 0.5rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .btn-search {
+    background: var(--sepia);
+    color: var(--ink);
+    border: none;
+    padding: 0.6rem 1.2rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: background 0.2s;
+    white-space: nowrap;
+  }
+
+  .btn-search:hover { background: var(--paper); }
+  .btn-search:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .search-divider {
+    font-size: 0.6rem;
+    color: var(--fog);
+    padding: 0 0.2rem;
+  }
+
+  /* 필터 칩 */
+  .filter-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .filter-label {
+    font-size: 0.55rem;
+    color: var(--fog);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-right: 0.2rem;
+  }
+
+  .chip {
+    background: transparent;
+    border: 1px solid rgba(138,138,154,0.25);
+    color: var(--fog);
+    padding: 0.25rem 0.7rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.58rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 20px;
+    transition: all 0.2s;
+  }
+
+  .chip:hover { border-color: var(--sepia); color: var(--sepia); }
+  .chip.active { background: var(--sepia); border-color: var(--sepia); color: var(--ink); }
+
+  /* 현재 검색 상태 표시 */
+  .search-status {
+    font-size: 0.6rem;
+    color: var(--sepia);
+    letter-spacing: 0.08em;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .search-status .clear-btn {
+    background: none;
+    border: none;
+    color: var(--fog);
+    cursor: pointer;
+    font-size: 0.7rem;
+    padding: 0;
+    transition: color 0.2s;
+  }
+
+  .search-status .clear-btn:hover { color: var(--rust); }
+
+  /* 메인 */
+  main {
+    padding: 1.5rem 0;
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 1.5rem;
+    align-items: start;
+  }
+
+  .cam-section { display: flex; flex-direction: column; gap: 1rem; }
+
+  .cam-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  .cam-location {
+    font-family: 'Playfair Display', serif;
+    font-size: 2.4rem;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--paper);
+  }
+
+  .cam-location .country {
+    font-size: 0.7rem;
+    font-family: 'DM Mono', monospace;
+    font-weight: 300;
+    color: var(--sepia);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 0.3rem;
+  }
+
+  .cam-time {
+    font-size: 0.65rem;
+    color: var(--fog);
+    letter-spacing: 0.1em;
+    text-align: right;
+  }
+
+  .cam-time .local-time {
+    font-size: 1.4rem;
+    color: var(--paper);
+    font-family: 'Playfair Display', serif;
+    display: block;
+    line-height: 1;
+  }
+
+  .cam-frame {
+    position: relative;
+    aspect-ratio: 16/9;
+    background: #111118;
+    overflow: hidden;
+    border: 1px solid rgba(200,169,110,0.15);
+  }
+
+  .cam-frame::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, transparent 60%, rgba(10,10,15,0.8));
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .cam-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+  }
+
+  .cam-overlay {
+    position: absolute;
+    bottom: 1rem;
+    left: 1rem;
+    right: 1rem;
+    z-index: 3;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  .cam-title-overlay {
+    font-size: 0.7rem;
+    color: rgba(245,240,232,0.7);
+    letter-spacing: 0.08em;
+    max-width: 70%;
+  }
+
+  .live-dot {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.6rem;
+    color: var(--sepia);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
+  .live-dot::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--rust);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.8); }
+  }
+
+  .loading-state {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    background: #111118;
+    z-index: 5;
+    transition: opacity 0.4s;
+  }
+
+  .loading-state.hidden { opacity: 0; pointer-events: none; }
+
+  .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 1px solid rgba(200,169,110,0.2);
+    border-top-color: var(--sepia);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loading-text {
+    font-size: 0.65rem;
+    color: var(--fog);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+
+  .error-state {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.8rem;
+    background: #111118;
+    z-index: 4;
+  }
+
+  .error-state.show { display: flex; }
+  .error-icon { font-size: 2rem; opacity: 0.4; }
+
+  .error-text {
+    font-size: 0.65rem;
+    color: var(--fog);
+    letter-spacing: 0.1em;
+    text-align: center;
+    line-height: 1.8;
+  }
+
+  .controls {
+    display: flex;
+    gap: 0.8rem;
+    align-items: center;
+  }
+
+  .btn-next {
+    background: var(--paper);
+    color: var(--ink);
+    border: none;
+    padding: 0.8rem 2rem;
+    font-family: 'Playfair Display', serif;
+    font-size: 1rem;
+    font-style: italic;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.02em;
+    flex: 1;
+  }
+
+  .btn-next:hover { background: var(--sepia); transform: translateY(-1px); }
+  .btn-next:active { transform: translateY(0); }
+  .btn-next:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  /* 사이드바 */
+  .sidebar { display: flex; flex-direction: column; gap: 1.2rem; }
+
+  .map-card {
+    border: 1px solid rgba(200,169,110,0.15);
+    overflow: hidden;
+  }
+
+  .card-label {
+    font-size: 0.6rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--fog);
+    padding: 0.6rem 0.8rem;
+    border-bottom: 1px solid rgba(200,169,110,0.1);
+  }
+
+  #map {
+    height: 220px;
+    background: #111118;
+  }
+
+  .leaflet-tile-pane { filter: grayscale(1) brightness(0.4) sepia(0.3); }
+  .leaflet-control-attribution { display: none; }
+  .leaflet-control-zoom a {
+    background: var(--ink) !important;
+    color: var(--sepia) !important;
+    border-color: rgba(200,169,110,0.3) !important;
+  }
+
+  .cam-list-card { border: 1px solid rgba(200,169,110,0.15); }
+
+  .cam-list {
+    max-height: 280px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(200,169,110,0.3) transparent;
+  }
+
+  .cam-list-item {
+    display: flex;
+    gap: 0.8rem;
+    align-items: center;
+    padding: 0.6rem 0.8rem;
+    border-bottom: 1px solid rgba(200,169,110,0.08);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .cam-list-item:hover { background: var(--glass); }
+  .cam-list-item.active { background: rgba(200,169,110,0.08); }
+
+  .cam-thumb {
+    width: 52px;
+    height: 36px;
+    object-fit: cover;
+    flex-shrink: 0;
+    opacity: 0.8;
+  }
+
+  .cam-list-info { flex: 1; overflow: hidden; }
+
+  .cam-list-title {
+    font-size: 0.65rem;
+    color: var(--paper);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 0.2rem;
+  }
+
+  .cam-list-country {
+    font-size: 0.55rem;
+    color: var(--fog);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .share-card {
+    border: 1px solid rgba(200,169,110,0.15);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .share-text {
+    font-size: 0.6rem;
+    color: var(--fog);
+    letter-spacing: 0.05em;
+    line-height: 1.6;
+  }
+
+  .share-btn {
+    background: transparent;
+    border: 1px solid rgba(200,169,110,0.3);
+    color: var(--sepia);
+    padding: 0.5rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .share-btn:hover { background: rgba(200,169,110,0.1); }
+
+  footer {
+    border-top: 1px solid rgba(200,169,110,0.15);
+    padding: 1.2rem 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .footer-text {
+    font-size: 0.55rem;
+    color: var(--fog);
+    letter-spacing: 0.12em;
+  }
+
+  .footer-text a { color: var(--sepia); text-decoration: none; }
+
+  .counter {
+    font-size: 0.6rem;
+    color: var(--fog);
+    letter-spacing: 0.08em;
+  }
+
+  .counter span { color: var(--sepia); }
+
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; }
+    .sidebar { display: grid; grid-template-columns: 1fr 1fr; }
+    .share-card { grid-column: 1/-1; }
+  }
+
+  @media (max-width: 600px) {
+    .sidebar { grid-template-columns: 1fr; }
+    .cam-location { font-size: 1.6rem; }
+    .search-wrap { max-width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <header>
+    <div class="logo">World<span>Cam</span></div>
+    <div class="header-meta">지금 세계 어딘가는 &mdash;</div>
+  </header>
+
+  <!-- 검색 + 필터 바 -->
+  <div class="search-bar">
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input
+        type="text"
+        class="search-input"
+        id="searchInput"
+        placeholder="나라 또는 도시 검색... (예: 포르투갈, 리스본, 도쿄, Bali)"
+        autocomplete="off"
+      >
+      <div class="autocomplete" id="autocomplete"></div>
+    </div>
+    <button class="btn-search" id="btnSearch" onclick="doSearch()">검색</button>
+    <span class="search-divider">|</span>
+    <div class="filter-row">
+      <span class="filter-label">카테고리</span>
+      <button class="chip active" onclick="setCategory(this, '')">전체</button>
+      <button class="chip" onclick="setCategory(this, 'beach')">🏖 해변</button>
+      <button class="chip" onclick="setCategory(this, 'city')">🏙 도시</button>
+      <button class="chip" onclick="setCategory(this, 'mountain')">⛰ 산</button>
+      <button class="chip" onclick="setCategory(this, 'harbor')">⚓ 항구</button>
+      <button class="chip" onclick="setCategory(this, 'traffic')">🚗 도로</button>
+    </div>
+    <div class="search-status" id="searchStatus" style="display:none">
+      <span id="searchStatusText"></span>
+      <button class="clear-btn" onclick="clearSearch()" title="검색 초기화">✕</button>
+    </div>
+  </div>
+
+  <main>
+    <div class="cam-section">
+
+      <div class="cam-header">
+        <div class="cam-location">
+          <span class="country" id="camCountry">— / —</span>
+          <span id="camCity">카메라 선택 중</span>
+        </div>
+        <div class="cam-time">
+          <span class="local-time" id="localTime">--:--</span>
+          <span id="localDate">현지 시각</span>
+        </div>
+      </div>
+
+      <div class="cam-frame">
+        <div class="loading-state" id="loadingState">
+          <div class="loading-spinner"></div>
+          <div class="loading-text" id="loadingText">세계를 탐색 중</div>
+        </div>
+        <div class="error-state" id="errorState">
+          <div class="error-icon">📡</div>
+          <div class="error-text">카메라 연결 실패<br>다른 곳을 눌러보세요<br><small id="errorMsg" style="opacity:0.5"></small></div>
+        </div>
+        <img class="cam-img" id="camImg" src="" alt="webcam">
+        <div class="cam-overlay">
+          <div class="cam-title-overlay" id="camTitleOverlay"></div>
+          <div class="live-dot">LIVE</div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button class="btn-next" id="btnNext" onclick="loadRandom()">→ 다음 장소</button>
+      </div>
+
+    </div>
+
+    <div class="sidebar">
+
+      <div class="map-card">
+        <div class="card-label">현재 위치</div>
+        <div id="map"></div>
+      </div>
+
+      <div class="cam-list-card">
+        <div class="card-label">최근 방문</div>
+        <div class="cam-list" id="camList">
+          <div style="padding:1rem; font-size:0.6rem; color:var(--fog); letter-spacing:0.1em;">
+            카메라를 불러오면 여기에 표시됩니다
+          </div>
+        </div>
+      </div>
+
+      <div class="share-card">
+        <div class="card-label" style="padding:0; margin-bottom:0.4rem;">공유하기</div>
+        <div class="share-text" id="shareText">지금 보고 있는 곳을 친구에게 알려보세요.</div>
+        <button class="share-btn" onclick="copyLink()">🔗 링크 복사</button>
+        <button class="share-btn" onclick="doShareText()">💬 카카오톡 공유</button>
+      </div>
+
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-text">
+      Powered by <a href="https://windy.com" target="_blank">Windy Webcams</a> &mdash;
+      <a href="https://youngri.org" target="_blank">youngri.org</a>
+    </div>
+    <div class="counter">오늘 <span id="visitCount">0</span>곳 방문</div>
+  </footer>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── 설정 ──────────────────────────────────────────────
+const PROXY_URL = 'https://worldcam.krisakma.workers.dev';
+
+// ── 상태 ──────────────────────────────────────────────
+let currentCam = null;
+let currentCategory = '';
+let currentSearch = null; // { type: 'nearby'|'country', lat, lng, name } or null
+let visitCount = 0;
+let recentCams = [];
+let map, marker;
+let isLoading = false;
+let searchTimeout = null;
+
+// ── 초기화 ────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  initMap();
+  updateClock();
+  setInterval(updateClock, 1000);
+  loadRandom();
+
+  // 검색 입력 이벤트
+  const input = document.getElementById('searchInput');
+  input.addEventListener('input', onSearchInput);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
+    if (e.key === 'Escape') closeAutocomplete();
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.search-wrap')) closeAutocomplete();
+  });
+});
+
+function initMap() {
+  map = L.map('map', { zoomControl: true, attributionControl: false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+  map.setView([30, 10], 1);
+  marker = L.circleMarker([30, 10], {
+    radius: 7, color: '#c8a96e', fillColor: '#b85c38', fillOpacity: 0.9, weight: 2
+  }).addTo(map);
+}
+
+// ── 검색 자동완성 ─────────────────────────────────────
+function onSearchInput() {
+  const q = document.getElementById('searchInput').value.trim();
+  clearTimeout(searchTimeout);
+  if (q.length < 2) { closeAutocomplete(); return; }
+  searchTimeout = setTimeout(() => fetchAutocomplete(q), 350);
+}
+
+// 한글 → 영어 지명 매핑
+const KO_TO_EN = {
+  '한국': 'South Korea', '서울': 'Seoul', '부산': 'Busan', '제주': 'Jeju',
+  '일본': 'Japan', '도쿄': 'Tokyo', '오사카': 'Osaka', '교토': 'Kyoto', '후쿠오카': 'Fukuoka',
+  '중국': 'China', '베이징': 'Beijing', '상하이': 'Shanghai',
+  '미국': 'United States', '뉴욕': 'New York', '샌프란시스코': 'San Francisco', '로스앤젤레스': 'Los Angeles',
+  '영국': 'United Kingdom', '런던': 'London',
+  '프랑스': 'France', '파리': 'Paris',
+  '독일': 'Germany', '베를린': 'Berlin',
+  '이탈리아': 'Italy', '로마': 'Rome', '베네치아': 'Venice', '밀라노': 'Milan',
+  '스페인': 'Spain', '바르셀로나': 'Barcelona', '마드리드': 'Madrid',
+  '포르투갈': 'Portugal', '리스본': 'Lisbon', '포르투': 'Porto',
+  '그리스': 'Greece', '아테네': 'Athens', '산토리니': 'Santorini',
+  '터키': 'Turkey', '이스탄불': 'Istanbul',
+  '태국': 'Thailand', '방콕': 'Bangkok', '푸켓': 'Phuket', '치앙마이': 'Chiang Mai',
+  '베트남': 'Vietnam', '하노이': 'Hanoi', '호치민': 'Ho Chi Minh',
+  '호주': 'Australia', '시드니': 'Sydney', '멜버른': 'Melbourne',
+  '캐나다': 'Canada', '토론토': 'Toronto', '밴쿠버': 'Vancouver',
+  '브라질': 'Brazil', '리우': 'Rio de Janeiro',
+  '하와이': 'Hawaii', '발리': 'Bali', '몰디브': 'Maldives',
+  '뉴질랜드': 'New Zealand', '오클랜드': 'Auckland',
+  '싱가포르': 'Singapore', '홍콩': 'Hong Kong', '대만': 'Taiwan', '타이베이': 'Taipei',
+  '인도': 'India', '뭄바이': 'Mumbai', '뉴델리': 'New Delhi',
+  '이집트': 'Egypt', '카이로': 'Cairo',
+  '남아프리카': 'South Africa', '케이프타운': 'Cape Town',
+  '모로코': 'Morocco', '마라케시': 'Marrakech',
+  '노르웨이': 'Norway', '오슬로': 'Oslo',
+  '스웨덴': 'Sweden', '스톡홀름': 'Stockholm',
+  '덴마크': 'Denmark', '코펜하겐': 'Copenhagen',
+  '네덜란드': 'Netherlands', '암스테르담': 'Amsterdam',
+  '스위스': 'Switzerland', '취리히': 'Zurich', '제네바': 'Geneva',
+  '오스트리아': 'Austria', '빈': 'Vienna',
+  '체코': 'Czech Republic', '프라하': 'Prague',
+  '헝가리': 'Hungary', '부다페스트': 'Budapest',
+  '폴란드': 'Poland', '바르샤바': 'Warsaw',
+  '러시아': 'Russia', '모스크바': 'Moscow',
+};
+
+function translateKoToEn(q) {
+  // 직접 매핑 먼저
+  if (KO_TO_EN[q]) return KO_TO_EN[q];
+  // 부분 매핑 (포함 검색)
+  for (const [ko, en] of Object.entries(KO_TO_EN)) {
+    if (q.includes(ko)) return q.replace(ko, en);
+  }
+  return null;
+}
+
+function isKorean(q) {
+  return /[가-힣]/.test(q);
+}
+
+async function fetchAutocomplete(q) {
+  try {
+    // 한글이면 영어 번역 시도
+    let queries = [q];
+    if (isKorean(q)) {
+      const en = translateKoToEn(q);
+      if (en) queries = [en, q]; // 영어 먼저, 한글 폴백
+      else queries = [q]; // 매핑 없으면 그냥 한글로
+    }
+
+    let data = [];
+    for (const query of queries) {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=6&addressdetails=1`;
+      const res = await fetch(url, { headers: { 'Accept-Language': 'ko,en' } });
+      data = await res.json();
+      if (data.length) break; // 결과 있으면 중단
+    }
+
+    showAutocomplete(data);
+  } catch(e) { closeAutocomplete(); }
+}
+
+function showAutocomplete(results) {
+  const box = document.getElementById('autocomplete');
+  if (!results.length) { closeAutocomplete(); return; }
+
+  box.innerHTML = results.map((r, i) => {
+    const type = r.type || r.class || '';
+    const typeLabel = getTypeLabel(type);
+    return `<div class="autocomplete-item" onclick="selectPlace(${i})" data-idx="${i}">
+      ${r.display_name.split(',').slice(0,3).join(', ')}
+      <span class="place-type">${typeLabel}</span>
+    </div>`;
+  }).join('');
+
+  box._results = results;
+  box.classList.add('show');
+}
+
+function getTypeLabel(type) {
+  const map = {
+    'country': '국가', 'city': '도시', 'town': '도시', 'village': '마을',
+    'beach': '해변', 'island': '섬', 'administrative': '지역',
+    'tourism': '관광', 'natural': '자연'
+  };
+  return map[type] || type || '장소';
+}
+
+function selectPlace(idx) {
+  const box = document.getElementById('autocomplete');
+  const r = box._results[idx];
+  if (!r) return;
+
+  const name = r.display_name.split(',').slice(0,2).join(', ');
+  document.getElementById('searchInput').value = name;
+  closeAutocomplete();
+
+  currentSearch = {
+    type: 'nearby',
+    lat: parseFloat(r.lat),
+    lng: parseFloat(r.lon),
+    name: name,
+    radius: getRadius(r.type || r.class)
+  };
+
+  updateSearchStatus(name);
+  loadRandom();
+}
+
+function getRadius(type) {
+  if (['country', 'administrative'].includes(type)) return 300;
+  if (['city', 'town'].includes(type)) return 80;
+  return 50;
+}
+
+function closeAutocomplete() {
+  document.getElementById('autocomplete').classList.remove('show');
+}
+
+async function doSearch() {
+  const q = document.getElementById('searchInput').value.trim();
+  if (!q) { clearSearch(); return; }
+  closeAutocomplete();
+
+  document.getElementById('btnSearch').disabled = true;
+  document.getElementById('loadingText').textContent = '위치 검색 중...';
+  showLoading();
+
+  try {
+    let queries = [q];
+    if (isKorean(q)) {
+      const en = translateKoToEn(q);
+      if (en) queries = [en, q];
+    }
+
+    let data = [];
+    for (const query of queries) {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
+        { headers: { 'Accept-Language': 'ko,en' } }
+      );
+      data = await res.json();
+      if (data.length) break;
+    }
+
+    document.getElementById('btnSearch').disabled = false;
+
+    if (!data.length) {
+      hideLoading();
+      showError();
+      document.getElementById('errorMsg').textContent = `"${q}" 위치를 찾을 수 없어요`;
+      return;
+    }
+
+    const r = data[0];
+    const name = r.display_name.split(',').slice(0,2).join(', ');
+    currentSearch = {
+      type: 'nearby', lat: parseFloat(r.lat), lng: parseFloat(r.lon),
+      name, radius: getRadius(r.type || r.class)
+    };
+    updateSearchStatus(name);
+    loadRandom();
+
+  } catch(e) {
+    document.getElementById('btnSearch').disabled = false;
+    hideLoading();
+  }
+}
+
+function updateSearchStatus(name) {
+  document.getElementById('searchStatus').style.display = 'flex';
+  document.getElementById('searchStatusText').textContent = `📍 ${name}`;
+}
+
+function clearSearch() {
+  currentSearch = null;
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchStatus').style.display = 'none';
+  loadRandom();
+}
+
+// ── 카메라 로드 ───────────────────────────────────────
+async function loadRandom() {
+  if (isLoading) return;
+  isLoading = true;
+
+  const btn = document.getElementById('btnNext');
+  btn.disabled = true;
+  btn.textContent = '... 탐색 중';
+  document.getElementById('loadingText').textContent = '세계를 탐색 중';
+  showLoading();
+  hideError();
+
+  try {
+    let url;
+    if (currentSearch?.type === 'nearby') {
+      const cat = currentCategory ? `&category=${currentCategory}` : '';
+      url = `${PROXY_URL}?mode=nearby&lat=${currentSearch.lat}&lng=${currentSearch.lng}&radius=${currentSearch.radius}&limit=20${cat}`;
+    } else {
+      const offset = Math.floor(Math.random() * 800);
+      const cat = currentCategory ? `&category=${currentCategory}` : '';
+      url = `${PROXY_URL}?mode=list&limit=20&offset=${offset}${cat}`;
+    }
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    const webcams = data.webcams || [];
+    if (!webcams.length) throw new Error('이 지역에 카메라가 없어요');
+
+    const valid = webcams.filter(w => w.status === 'active' && w.images?.current?.preview);
+    const pool = valid.length ? valid : webcams;
+    const cam = pool[Math.floor(Math.random() * pool.length)];
+
+    displayCam(cam);
+
+  } catch (err) {
+    console.error(err);
+    document.getElementById('errorMsg').textContent = err.message;
+    showError();
+  } finally {
+    isLoading = false;
+    btn.disabled = false;
+    btn.textContent = '→ 다음 장소';
+  }
+}
+
+function displayCam(cam) {
+  currentCam = cam;
+  visitCount++;
+  document.getElementById('visitCount').textContent = visitCount;
+
+  const loc = cam.location || {};
+  const city = cam.title || loc.city || '알 수 없음';
+  const country = loc.country || '—';
+  const lat = loc.latitude;
+  const lng = loc.longitude;
+
+  document.getElementById('camCity').textContent = city;
+  document.getElementById('camCountry').textContent = country;
+  document.getElementById('camTitleOverlay').textContent = city;
+  document.getElementById('shareText').textContent =
+    `지금 ${country} ${city}의 실시간 모습을 보고 있어요 🌍`;
+
+  if (lat && lng) {
+    map.setView([lat, lng], 9, { animate: true, duration: 1.5 });
+    marker.setLatLng([lat, lng]);
+    marker.bindPopup(`<b>${city}</b><br><small>${country}</small>`);
+  }
+
+  const imgUrl = cam.images?.current?.preview || cam.images?.current?.icon || '';
+  if (imgUrl) {
+    const img = document.getElementById('camImg');
+    img.style.opacity = 0;
+    const temp = new Image();
+    temp.onload = () => {
+      img.src = imgUrl;
+      img.style.transition = 'opacity 0.6s';
+      img.style.opacity = 1;
+      hideLoading();
+    };
+    temp.onerror = () => {
+      document.getElementById('errorMsg').textContent = '이미지 로드 실패';
+      showError();
+    };
+    temp.src = imgUrl;
+  } else {
+    document.getElementById('errorMsg').textContent = '이미지 없음';
+    showError();
+  }
+
+  addToRecentList(cam, imgUrl);
+}
+
+// ── 최근 목록 ─────────────────────────────────────────
+function addToRecentList(cam, imgUrl) {
+  recentCams.unshift({ cam, imgUrl });
+  if (recentCams.length > 10) recentCams.pop();
+
+  document.getElementById('camList').innerHTML = recentCams.map((item, i) => {
+    const loc = item.cam.location || {};
+    return `<div class="cam-list-item ${i===0?'active':''}" onclick="selectRecent(${i})">
+      <img class="cam-thumb" src="${item.imgUrl}" onerror="this.style.opacity=0.1">
+      <div class="cam-list-info">
+        <div class="cam-list-title">${item.cam.title || '—'}</div>
+        <div class="cam-list-country">${loc.country || '—'}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function selectRecent(i) {
+  if (recentCams[i]) displayCam(recentCams[i].cam);
+}
+
+// ── 카테고리 ──────────────────────────────────────────
+function setCategory(el, cat) {
+  currentCategory = cat;
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  loadRandom();
+}
+
+// ── 시계 ──────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  document.getElementById('localTime').textContent =
+    now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('localDate').textContent =
+    now.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
+}
+
+// ── UI 상태 ───────────────────────────────────────────
+function showLoading() { document.getElementById('loadingState').classList.remove('hidden'); }
+function hideLoading() { document.getElementById('loadingState').classList.add('hidden'); }
+function showError() { hideLoading(); document.getElementById('errorState').classList.add('show'); }
+function hideError() { document.getElementById('errorState').classList.remove('show'); }
+
+// ── 공유 ──────────────────────────────────────────────
+function copyLink() {
+  navigator.clipboard.writeText(window.location.href)
+    .then(() => alert('링크 복사됐어요!'));
+}
+
+function doShareText() {
+  const loc = currentCam?.location || {};
+  const city = currentCam?.title || loc.city || '세계 어딘가';
+  const country = loc.country || '';
+  const text = `지금 ${country} ${city}의 실시간 모습 👀\n🌍 WorldCam: ${window.location.href}`;
+  navigator.clipboard.writeText(text)
+    .then(() => alert('복사됐어요! 카카오톡에 붙여넣기 하세요 😊\n\n' + text));
+}
+</script>
+</body>
+</html>
